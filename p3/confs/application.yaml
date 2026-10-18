@@ -8,7 +8,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/YOUR_USERNAME/inception-of-things-aaghla.git
+    repoURL: https://github.com/AghlaAbdo/inception-of-things.git
     targetRevision: HEAD
     path: p3/confs/app
 
