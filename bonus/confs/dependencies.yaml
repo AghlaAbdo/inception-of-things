@@ -1,0 +1,187 @@
+# Stateful lab dependencies use the K3s default local-path StorageClass.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-postgresql
+  namespace: gitlab
+spec:
+  selector: {app: lab-postgresql}
+  ports:
+    - {name: postgres, port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lab-postgresql
+  namespace: gitlab
+spec:
+  serviceName: lab-postgresql
+  replicas: 1
+  selector:
+    matchLabels: {app: lab-postgresql}
+  template:
+    metadata:
+      labels: {app: lab-postgresql}
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:17-bookworm
+          # GitLab's schema has thousands of tables/indexes loaded in one transaction.
+          args: [-c, max_locks_per_transaction=512, -c, max_connections=200]
+          env:
+            - {name: POSTGRES_USER, value: gitlab}
+            - {name: POSTGRES_DB, value: gitlabhq_production}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lab-postgresql, key: password}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {containerPort: 5432}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U gitlab -d gitlabhq_production']
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 8Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-redis
+  namespace: gitlab
+spec:
+  selector: {app: lab-redis}
+  ports:
+    - {name: redis, port: 6379, targetPort: 6379}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lab-redis
+  namespace: gitlab
+spec:
+  serviceName: lab-redis
+  replicas: 1
+  selector:
+    matchLabels: {app: lab-redis}
+  template:
+    metadata:
+      labels: {app: lab-redis}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-bookworm
+          command: [sh, -ec]
+          args:
+            - 'exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"'
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lab-redis, key: password}
+          ports:
+            - {containerPort: 6379}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+          readinessProbe:
+            exec:
+              command: [sh, -ec, 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-s3
+  namespace: gitlab
+spec:
+  selector: {app: lab-s3}
+  ports:
+    - {name: s3, port: 3900, targetPort: 3900}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lab-s3
+  namespace: gitlab
+spec:
+  serviceName: lab-s3
+  replicas: 1
+  selector:
+    matchLabels: {app: lab-s3}
+  template:
+    metadata:
+      labels: {app: lab-s3}
+    spec:
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.4.1
+          command: [/garage]
+          args: [server, --single-node, --default-access-key]
+          env:
+            - name: GARAGE_DEFAULT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: lab-s3, key: accesskey}
+            - name: GARAGE_DEFAULT_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: lab-s3, key: secretkey}
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef: {name: lab-s3, key: rpcsecret}
+          ports:
+            - {containerPort: 3900}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+          readinessProbe:
+            exec:
+              command: [/garage, health, --quiet]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/garage}
+            - {name: config, mountPath: /etc/garage.toml, subPath: garage.toml, readOnly: true}
+      volumes:
+        - name: config
+          configMap:
+            name: lab-s3
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 8Gi}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lab-s3
+  namespace: gitlab
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = 1
+    rpc_bind_addr = "0.0.0.0:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+    [s3_api]
+    s3_region = "us-east-1"
+    api_bind_addr = "0.0.0.0:3900"
