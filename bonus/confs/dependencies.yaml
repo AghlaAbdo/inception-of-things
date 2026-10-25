@@ -33,7 +33,7 @@ spec:
             - {name: POSTGRES_DB, value: gitlabhq_production}
             - name: POSTGRES_PASSWORD
               valueFrom:
-                secretKeyRef: {name: lab-postgresql, key: password}
+                secretKeyRef: {name: gitlab-dependencies, key: postgresql-password}
             - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
           ports:
             - {containerPort: 5432}
@@ -87,7 +87,7 @@ spec:
           env:
             - name: REDIS_PASSWORD
               valueFrom:
-                secretKeyRef: {name: lab-redis, key: password}
+                secretKeyRef: {name: gitlab-dependencies, key: redis-password}
           ports:
             - {containerPort: 6379}
           resources:
@@ -138,13 +138,13 @@ spec:
           env:
             - name: GARAGE_DEFAULT_ACCESS_KEY
               valueFrom:
-                secretKeyRef: {name: lab-s3, key: accesskey}
+                secretKeyRef: {name: gitlab-dependencies, key: accesskey}
             - name: GARAGE_DEFAULT_SECRET_KEY
               valueFrom:
-                secretKeyRef: {name: lab-s3, key: secretkey}
+                secretKeyRef: {name: gitlab-dependencies, key: secretkey}
             - name: GARAGE_RPC_SECRET
               valueFrom:
-                secretKeyRef: {name: lab-s3, key: rpcsecret}
+                secretKeyRef: {name: gitlab-dependencies, key: rpcsecret}
           ports:
             - {containerPort: 3900}
           resources:

@@ -25,20 +25,20 @@ global:
     username: gitlab
     database: gitlabhq_production
     password:
-      secret: lab-postgresql
-      key: password
+      secret: gitlab-dependencies
+      key: postgresql-password
   redis:
     host: lab-redis.gitlab.svc.cluster.local
     auth:
       enabled: true
-      secret: lab-redis
-      key: password
+      secret: gitlab-dependencies
+      key: redis-password
   appConfig:
     object_store:
       enabled: true
       proxy_download: true
       connection:
-        secret: lab-object-storage
+        secret: gitlab-dependencies
         key: connection
   kas:
     enabled: false
@@ -84,10 +84,6 @@ gitlab:
         cpu: 100m
         memory: 512Mi
   toolbox:
-    backups:
-      objectStorage:
-        config:
-          secret: lab-object-storage
-          key: s3cfg
+    enabled: false
   gitlab-exporter:
     enabled: false
