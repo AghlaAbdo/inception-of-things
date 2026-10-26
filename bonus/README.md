@@ -158,6 +158,12 @@ For startup errors, inspect Pod events and migration logs. Pending PVCs indicate
 a storage provisioning problem; ImagePullBackOff concerns registry access or
 an image reference. GitLab initialization needs its backends ready first.
 
+Helm uses `--wait=legacy` so slow initial image downloads can use the full
+30-minute readiness timeout instead of failing early on a Deployment's
+10-minute progress deadline. If an installation already stopped with
+`Progress deadline exceeded`, rerun `bash bonus/scripts/setup.sh`; keep the
+existing cluster and its data.
+
 `k3d cluster stop iot-bonus` releases runtime resources while retaining node data.
 Deleting the cluster removes its local GitLab repositories and backing storage.
 This is a local HTTP lab with single replicas; no automatic backup schedule is

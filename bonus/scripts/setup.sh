@@ -61,7 +61,7 @@ if [[ -z "$chart" ]]; then
 fi
 helm upgrade --install gitlab gitlab/gitlab --version "$chart" \
   --kube-context k3d-iot-bonus -n gitlab -f confs/gitlab-values.yaml \
-  --timeout 30m --wait --wait-for-jobs
+  --timeout 30m --wait=legacy --wait-for-jobs
 
 kube apply -n argocd --server-side --force-conflicts \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.6/manifests/install.yaml
