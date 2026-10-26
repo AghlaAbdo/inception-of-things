@@ -71,5 +71,5 @@ for deployment in argocd-server argocd-repo-server argocd-redis; do
 done
 kube -n argocd rollout status statefulset/argocd-application-controller --timeout=600s
 
-echo 'Infrastructure ready. From the repository root, run bash bonus/scripts/access.sh.'
-echo 'Follow bonus/README.md to create the public GitLab project, push app/, and apply the Application.'
+bash scripts/bootstrap.sh
+echo 'Setup complete. From the repository root, run bash bonus/scripts/access.sh.'

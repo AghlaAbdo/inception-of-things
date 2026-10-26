@@ -16,6 +16,7 @@ bonus/
 ├── scripts/
 │   ├── install.sh
 │   ├── setup.sh
+│   ├── bootstrap.sh
 │   └── access.sh
 ├── confs/
 │   ├── gitlab-values.yaml
@@ -27,23 +28,23 @@ bonus/
 └── IMPLEMENTATION.md
 ```
 
-There are **three shell scripts and four YAML files**. Python scripts, token/API
-automation, a common shell library, version-change and verification scripts,
-and custom Argo CD polling configuration have been removed.
+There are **four shell scripts and four YAML files**. Bootstrap uses GitLab
+services through Rails runner; no Python, API tokens, shared shell library,
+version-change helper, or custom Argo CD polling configuration is needed.
 
 | File | Responsibility |
 | --- | --- |
 | `install.sh` | Install host tools and configure the local GitLab hostname |
-| `setup.sh` | Create the cluster and install dependencies, GitLab, and Argo CD |
+| `setup.sh` | Create the cluster, install dependencies, GitLab and Argo CD, then call bootstrap |
+| `bootstrap.sh` | Create/seed the GitLab project and register the Argo CD Application |
 | `access.sh` | Display initial passwords and forward the Argo CD interface |
 | `gitlab-values.yaml` | Override the official GitLab Helm chart's defaults |
 | `dependencies.yaml` | Provide local PostgreSQL, Redis, and S3-compatible storage |
 | `application.yaml` | Tell Argo CD which GitLab repository/path to deploy |
 | `app/manifests.yaml` | Define the playground Deployment and Service |
 
-Repository creation uses GitLab's web interface. Version changes use the GitLab
-editor or normal `git add`, `git commit`, and `git push`. These are visible steps
-you can explain and demonstrate directly.
+Repository creation and the initial commit are automatic. Version changes use
+the GitLab editor or normal `git add`, `git commit`, and `git push`.
 
 ## 2. Architecture and ownership
 
@@ -156,10 +157,39 @@ including later GitLab commits that are not present in this repository's seed fi
 6. Create any missing S3 buckets and grant permissions.
 7. Install GitLab with the official Helm chart, waiting for resources and Jobs.
 8. Install the pinned Argo CD `v3.5.6` manifests and wait for core components.
+9. Call `bootstrap.sh` to create/seed the repository and register the Application.
+10. Wait for the Application to become Synced and Healthy.
 
-It then finishes. You create the public `root/iot-playground` project in the GitLab
-UI, push the `app/` manifests on `main`, and apply `confs/application.yaml`.
-This explicit handoff replaces the previous application-specific Python code.
+### Repository bootstrap
+
+`kubectl exec -i` runs `rails runner` in the existing webservice container. Rails
+runner loads GitLab's application code and executes the inline Ruby program using
+its database and Gitaly configuration. It uses the existing `root` user with
+GitLab's `Projects::CreateService` and `Files::CreateService`. These are internal
+GitLab interfaces, verified against the installed version; future chart upgrades
+may require adjusting the bootstrap. No separate Ruby installation on the VM or
+toolbox pod is required.
+
+The script looks up `root/iot-playground`, creating it with public visibility if
+absent. For an empty repository it creates one initial commit containing the seed
+manifest on `main`. The manifest is base64-encoded for transport over standard
+input; it is data, not Ruby code. This encoding is not encryption.
+
+A populated repository is preserved, including v2 commits. Bootstrap checks for
+`app/manifests.yaml` on `main` and public visibility; it stops rather than changing
+existing visibility or replacing history. An interrupted empty-project creation
+can therefore be retried. Setup should be run by one operator at a time.
+
+Finally, bootstrap applies `confs/application.yaml` and waits up to ten minutes
+for synchronization, then up to ten minutes for health. Argo CD, rather than the
+bootstrap script, creates the playground Deployment and Service. On timeout,
+inspect the Application and Pods and rerun bootstrap; no rollback or cluster
+delete is performed.
+
+This is privileged initialization: access to exec into the webservice pod allows
+GitLab administration without a password. It avoids storing an administrator API
+token or depending on the initial root password, even if that password changes.
+The public repository allows subsequent Argo CD reads without credentials.
 
 ## 6. How network access works
 
@@ -239,7 +269,7 @@ change can be reversed by self-healing while Git still requests another image.
 
 “I create a K3s cluster with K3d inside the project VM. I install GitLab CE through
 Helm and supply its required persistent PostgreSQL, Redis, and S3 services.
-GitLab runs in its own namespace. I create a public GitLab repository containing
+GitLab runs in its own namespace. Setup creates a public GitLab repository containing
 the application's Kubernetes manifests. Argo CD tracks its main branch and
 deploys into dev. When I commit an image change from v1 to v2, Argo CD detects
 the commit and Kubernetes rolls out the new version. I verify the synchronized

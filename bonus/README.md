@@ -1,8 +1,8 @@
 # Bonus: GitLab, Helm, and Argo CD
 
-Three shell scripts install the lab and expose its interfaces. Repository creation
-and version changes use GitLab and normal Git commands. There is no Python, API
-token automation, shared shell library, or custom verification script.
+Four shell scripts install the lab, bootstrap the GitLab repository and Argo CD
+Application, and expose the interfaces. Version changes use GitLab or normal Git
+commands. No Python or API tokens are needed.
 
 The official GitLab Helm chart requires PostgreSQL, Redis, and object storage.
 Those necessary services remain in one dependency manifest. See
@@ -26,10 +26,13 @@ Setup creates the **`iot-bonus`** cluster with namespaces `gitlab`, `argocd`, an
 reruns reuse the version recorded by the installed Helm release. Argo CD is
 pinned to `v3.5.6`. First startup can take 20–30 minutes for downloads and migrations.
 
-Setup stops after installing the infrastructure. The next two sections create
-the deployment source and register it with Argo CD.
+Setup then calls `scripts/bootstrap.sh`: it creates the public GitLab project
+`root/iot-playground`, commits `app/manifests.yaml` on `main` if the repository is
+empty, applies the Argo CD Application, and waits for Synced / Healthy. It uses
+GitLab services through Rails runner in the webservice pod, without an API token.
+Initial image downloads and synchronization can add several minutes.
 
-## 2. Open the interfaces and create the GitLab project
+## 2. Open the interfaces
 
 ```sh
 bash bonus/scripts/access.sh
@@ -56,57 +59,28 @@ These loopback URLs assume the browser runs on the project VM. A browser on a
 different host needs SSH forwarding to the VM and its own hostname mapping.
 Reinstalling Kubernetes does not fix browser-side DNS or an absent port forward.
 
-In GitLab, choose **New project → Create blank project**:
+## 3. Check the application and clone its repository
 
-- Project name/path: **`iot-playground`**.
-- Namespace: **`root`**.
-- Visibility: **Public**.
-- Leave **Initialize repository with a README** unchecked.
-
-The resulting project is `root/iot-playground`. Public visibility allows Argo CD
-to fetch it without GitLab credentials. This manual step replaces the previous
-Python/Rails/API bootstrap automation.
-
-If the project already exists, reuse it. Clone it into an empty working directory
-with `git clone http://root@gitlab.iot.test/root/iot-playground.git /tmp/iot-playground`
-and skip the initial commit/push block below; continue with application registration
-and the version-change demonstration.
-
-## 3. Push the application and register Argo CD
-
-Use a fresh directory for the GitOps repository. The following example uses
-`/tmp/iot-playground`; choose another empty directory if that path already exists.
-Run from the project repository root:
+Setup has already created and deployed the application. Check it with:
 
 ```sh
-mkdir -p /tmp/iot-playground/app
-cp bonus/confs/app/manifests.yaml /tmp/iot-playground/app/
-git -C /tmp/iot-playground init -b main
-git -C /tmp/iot-playground config user.name 'IoT Student'
-git -C /tmp/iot-playground config user.email 'student@iot.local'
-git -C /tmp/iot-playground remote add origin http://root@gitlab.iot.test/root/iot-playground.git
-git -C /tmp/iot-playground add app
-git -C /tmp/iot-playground commit -m 'Deploy playground v1'
-git -C /tmp/iot-playground push -u origin main
-```
-
-Use the GitLab `root` password when Git prompts. The example author name/email are
-Git commit metadata; they do not create a GitLab account. You can use your own
-author identity. Keep credentials out of remote URLs and repository files.
-
-Then register the application:
-
-```sh
-kubectl --context k3d-iot-bonus apply -f bonus/confs/application.yaml
-kubectl --context k3d-iot-bonus -n argocd get application playground -w
-```
-
-Wait for **Synced / Healthy**, then Ctrl-C the watch and check:
-
-```sh
+kubectl --context k3d-iot-bonus -n argocd get application playground
 curl http://localhost:8888/
 # {"status":"ok", "message":"v1"}
 ```
+
+A rerun preserves the version already committed in GitLab, so it may return v2.
+Clone the generated repository into an empty directory to make version changes:
+
+```sh
+git clone http://root@gitlab.iot.test/root/iot-playground.git /tmp/iot-playground
+git -C /tmp/iot-playground config user.name 'IoT Student'
+git -C /tmp/iot-playground config user.email 'student@iot.local'
+```
+
+Choose another directory if `/tmp/iot-playground` already exists. Use the GitLab
+`root` password when Git prompts during pushes. The example author name and email
+are commit metadata; you can use your own identity.
 
 Argo CD uses its normal polling schedule. Allow several minutes for detection
 and rollout; cached repository information and image downloads can add delay.
@@ -150,7 +124,10 @@ kubectl --context k3d-iot-bonus -n dev get deployment,replicaset,pod,service
 ```
 
 Rerunning `setup.sh` retains dependency credentials, PVCs, the installed GitLab
-chart version, and the GitLab repository. It does not push files or reset commits.
+chart version, and the GitLab repository. Bootstrap only seeds an empty repository;
+it does not reset existing commits or overwrite version changes. An existing
+project must be public and contain `app/manifests.yaml` on `main`; otherwise
+bootstrap stops and explains what to fix. It does not change existing visibility.
 Use its `iot-bonus` cluster name only for clusters created by this setup, since
 the required host port mappings are set at cluster creation.
 
@@ -169,7 +146,26 @@ Deleting the cluster removes its local GitLab repositories and backing storage.
 This is a local HTTP lab with single replicas; no automatic backup schedule is
 configured. The bonus is evaluated only after the mandatory parts work correctly.
 
+If infrastructure is already installed, run just the bootstrap from the project root:
+
+```sh
+bash bonus/scripts/bootstrap.sh
+```
+
+This is also how to retry application registration or a synchronization timeout.
+A failure before synchronization finishes leaves resources in place for inspection:
+
+```sh
+kubectl --context k3d-iot-bonus -n argocd get application playground -o yaml
+kubectl --context k3d-iot-bonus -n dev get pods
+```
+
 ## Validation
+
+On 2026-10-26, automatic bootstrap created the public project and initial commit,
+registered the Application, and reached Synced / Healthy with an HTTP v1 response.
+A full setup rerun succeeded and preserved the exact GitLab main-branch commit.
+Shell syntax and whitespace checks passed.
 
 Validated on 2026-10-25 with chart 10.5.1 / GitLab CE 19.5.1 and Argo CD 3.5.6:
 fresh-cluster setup, normal password-authenticated Git pushes, automatic
